@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>智能體多目標軌跡與高維檢索模擬器</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --panel-bg: #161b22;
+            --border-color: #30363d;
+            --text-color: #c9d1d9;
+            --neon-blue: #58a6ff;
+            --neon-green: #3fb950;
+            --neon-orange: #f0883e;
+            --neon-purple: #bc8cff;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: var(--neon-blue);
+            margin-bottom: 5px;
+            font-weight: 400;
+        }
+
+        .subtitle {
+            font-size: 0.9em;
+            color: #8b949e;
+            margin-bottom: 25px;
+            font-family: monospace;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 1100px;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85em;
+            color: #8b949e;
+            margin-bottom: 8px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--neon-blue);
+        }
+
+        .value-display {
+            float: right;
+            color: var(--neon-blue);
+            font-family: monospace;
+        }
+
+        button {
+            background-color: transparent;
+            border: 1px solid var(--neon-orange);
+            color: var(--neon-orange);
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+            width: 100%;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            font-family: monospace;
+        }
+
+        button:hover {
+            background-color: rgba(240, 136, 62, 0.1);
+            box-shadow: 0 0 8px rgba(240, 136, 62, 0.3);
+        }
+
+        button.surge-btn {
+            border-color: var(--neon-purple);
+            color: var(--neon-purple);
+        }
+
+        button.surge-btn:hover {
+            background-color: rgba(188, 140, 255, 0.1);
+            box-shadow: 0 0 8px rgba(188, 140, 255, 0.3);
+        }
+
+        .terminal {
+            background-color: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.75em;
+            padding: 10px;
+            height: 250px;
+            overflow-y: auto;
+            flex-grow: 1;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+
+        .log-line {
+            margin-bottom: 6px;
+            line-height: 1.3;
+        }
+
+        .log-tag { font-weight: bold; }
+        .tag-sys { color: var(--neon-blue); }
+        .tag-recall { color: var(--neon-green); }
+        .tag-surge { color: var(--neon-purple); }
+
+        .display-area {
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .canvas-container {
+            position: relative;
+            background-color: #0b0e14;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .canvas-title {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 0.8em;
+            font-family: monospace;
+            color: #8b949e;
+            z-index: 10;
+            background: rgba(22, 27, 34, 0.8);
+            padding: 2px 8px;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🐰 iRabbit 智能體分佈式追蹤系統</h1>
+    <div class="subtitle">DSL 解析與硬體仿真暫存器模擬面板</div>
+
+    <div class="dashboard">
+        <!-- 左側控制面板 -->
+        <div class="panel">
+            <div class="control-group">
+                <label>目標隊列容量 <span class="subtitle">(Teeth Array)</span> <span id="target-val" class="value-display">4</span></label>
+                <input type="range" id="target-slider" min="1" max="8" value="4" step="1">
+            </div>
+
+            <div class="control-group">
+                <label>環境雜訊與亂流 <span class="subtitle">(Snail Turbulence)</span> <span id="noise-val" class="value-display">25%</span></label>
+                <input type="range" id="noise-slider" min="0" max="100" value="25" step="5">
+            </div>
+
+            <button id="btn-reset">重置時鐘點陣 Pattern</button>
+            <button id="btn-surge" class="surge-btn">觸發 .surged() 突發浪湧</button>
+
+            <label style="margin-top: 15px;">核心內核核心日誌 (DSL Engine)</label>
+            <div id="term" class="terminal"></div>
+        </div>
+
+        <!-- 右側畫布視覺化區域 -->
+        <div class="display-area">
+            <!-- 畫布 1: 雷達追蹤與慢速包絡 -->
+            <div class="canvas-container">
+                <div class="canvas-title">MATRIX TRACKING FIELD [dots_iRabbit + snail_attribute]</div>
+                <canvas id="canvas-radar"></canvas>
+            </div>
+            <!-- 畫布 2: 高維斜方晶格空間 -->
+            <div class="canvas-container">
+                <div class="canvas-title">VECTOR LATTICE MEMORY [trice_rhombus_cell.heteo_recall]</div>
+                <canvas id="canvas-lattice"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化畫布與狀態
+        const cRadar = document.getElementById('canvas-radar');
+        const cLattice = document.getElementById('canvas-lattice');
+        const ctxR = cRadar.getContext('2d');
+        const ctxL = cLattice.getContext('2d');
+        const term = document.getElementById('term');
+
+        // 響應式設置畫布解度
+        function resizeCanvas() {
+            cRadar.width = cRadar.parentElement.clientWidth;
+            cRadar.height = cRadar.parentElement.clientHeight;
+            cLattice.width = cLattice.parentElement.clientWidth;
+            cLattice.height = cLattice.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 參數狀態控制
+        let config = {
+            targets: 4,
+            turbulence: 0.25,
+            surgeActive: false,
+            surgeTimer: 0
+        };
+
+        // UI 綁定
+        document.getElementById('target-slider').addEventListener('input', (e) => {
+            config.targets = parseInt(e.target.value);
+            document.getElementById('target-val').innerText = config.targets;
+            initTargets();
+        });
+        document.getElementById('noise-slider').addEventListener('input', (e) => {
+            config.turbulence = parseFloat(e.target.value) / 100;
+            document.getElementById('noise-val').innerText = e.target.value + '%';
+        });
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            initTargets();
+            logMessage('sys', 'iRo_pin 核心發出復位信號。Clock_record_pattern 已重新刷新。');
+        });
+        document.getElementById('btn-surge').addEventListener('click', () => {
+            config.surgeActive = true;
+            config.surgeTimer = 60; // 持續幀數
+            logMessage('surge', '⚡ WARNING: snail_complexity_turbulance.surged() 觸發！EMV 全局向量調變啟動！');
+        });
+
+        // 日誌終端輸出
+        function logMessage(type, msg) {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            let tag = '';
+            if(type === 'sys') tag = `<span class="log-tag tag-sys">[iRo_pin]</span> `;
+            if(type === 'recall') tag = `<span class="log-tag tag-recall">[Recall]</span> `;
+            if(type === 'surge') tag = `<span class="log-tag tag-surge">[EMV_Surge]</span> `;
+            
+            line.innerHTML = tag + msg;
+            term.appendChild(line);
+            term.scrollTop = term.scrollHeight;
+            if(term.childNodes.length > 40) term.removeChild(term.firstChild);
+        }
+
+        // 追蹤目標類別 (Teeth Array Members)
+        class TargetDevice {
+            constructor(id) {
+                this.id = id;
+                this.x = Math.random() * 0.6 + 0.2;
+                this.y = Math.random() * 0.6 + 0.2;
+                this.omega = Math.random() * 0.05 + 0.02; // omega_stochastic
+                this.angle = Math.random() * Math.PI * 2;
+                this.history = [];
+                this.recallPulse = 0;
+                this.assignedCell = { r: Math.floor(Math.random()*6), c: Math.floor(Math.random()*8) };
+            }
+
+            update() {
+                // 受到亂流與浪湧物理干擾
+                let noiseFactor = config.turbulence * 0.04;
+                if(config.surgeActive) noiseFactor *= 4;
+
+                this.angle += this.omega + (Math.random() - 0.5) * noiseFactor;
+                let radius = 0.15 + Math.sin(this.angle * 0.5) * 0.08;
+                
+                // 計算隨機漂移的 x, y 軌跡
+                this.x += Math.cos(this.angle) * radius * 0.05 + (Math.random() - 0.5) * noiseFactor * 0.5;
+                this.y += Math.sin(this.angle) * radius * 0.05 + (Math.random() - 0.5) * noiseFactor * 0.5;
+
+                // 邊界約束
+                this.x = Math.max(0.1, Math.min(0.9, this.x));
+                this.y = Math.max(0.1, Math.min(0.9, this.y));
+
+                // 點陣歷史紀錄 (dots_iRabbit)
+                this.history.push({x: this.x, y: this.y});
+                if(this.history.length > 25) this.history.shift();
+
+                // 隨機概率觸發晶格匹配聯想 (heteo_recall)
+                if(Math.random() < 0.01 && this.recallPulse === 0) {
+                    this.recallPulse = 1.0;
+                    logMessage('recall', `異質比對命中: Client_ID_0${this.id} 匹配至 Rhombus_Cell [${this.assignedCell.r}, ${this.assignedCell.c}]`);
+                }
+
+                if(this.recallPulse > 0) {
+                    this.recallPulse -= 0.02;
+                    if(this.recallPulse < 0) this.recallPulse = 0;
+                }
+            }
+        }
+
+        let deviceQueue = [];
+        function initTargets() {
+            deviceQueue = [];
+            for(let i=0; i<config.targets; i++) {
+                deviceQueue.push(new TargetDevice(i+1));
+            }
+        }
+        initTargets();
+        logMessage('sys', '內核初始化完成。探針卡射頻矩陣載入成功。');
+
+        // 主渲染循環 (60 FPS)
+        function draw() {
+            // 處理浪湧計時
+            if(config.surgeActive) {
+                config.surgeTimer--;
+                if(config.surgeTimer <= 0) config.surgeActive = false;
+            }
+
+            // --- 畫布 1: 雷達追蹤矩陣背景渲染 ---
+            ctxR.fillStyle = '#0b0e14';
+            ctxR.fillRect(0, 0, cRadar.width, cRadar.height);
+
+            // 繪製掃描雷達網格
+            ctxR.strokeStyle = 'rgba(48, 54, 61, 0.4)';
+            ctxR.lineWidth = 1;
+            for(let i=1; i<4; i++) {
+                ctxR.beginPath();
+                ctxR.arc(cRadar.width/2, cRadar.height/2, (cRadar.height/6)*i, 0, Math.PI*2);
+                ctxR.stroke();
+            }
+
+            // 更新並繪製目標與足跡
+            deviceQueue.forEach(dev => {
+                dev.update();
+                
+                // 畫蝸牛慢速軌跡包絡線面 (snail_attribute)
+                if(dev.history.length > 1) {
+                    ctxR.beginPath();
+                    ctxR.moveTo(dev.history[0].x * cRadar.width, dev.history[0].y * cRadar.height);
+                    dev.history.forEach(pt => {
+                        ctxR.lineTo(pt.x * cRadar.width, pt.y * cRadar.height);
+                    });
+                    ctxR.strokeStyle = config.surgeActive ? 'rgba(188, 140, 255, 0.2)' : 'rgba(88, 166, 255, 0.15)';
+                    ctxR.lineWidth = 12;
+                    ctxR.lineCap = 'round';
+                    ctxR.lineJoin = 'round';
+                    ctxR.stroke();
+                }
+
+                // 畫兔子點陣軌跡足跡 (dots_iRabbit)
+                dev.history.forEach((pt, index) => {
+                    let alpha = index / dev.history.length;
+                    ctxR.fillStyle = config.surgeActive ? `rgba(188, 140, 255, ${alpha})` : `rgba(88, 166, 255, ${alpha})`;
+                    ctxR.beginPath();
+                    ctxR.arc(pt.x * cRadar.width, pt.y * cRadar.height, 2, 0, Math.PI*2);
+                    ctxR.fill();
+                });
+
+                // 當前核心節點位置
+                ctxR.fillStyle = config.surgeActive ? varColor('--neon-purple') : varColor('--neon-blue');
+                ctxR.beginPath();
+                ctxR.arc(dev.x * cRadar.width, dev.y * cRadar.height, 5, 0, Math.PI*2);
+                ctxR.fill();
+            });
+
+            // --- 畫布 2: 高維斜方晶格空間渲染 (trice_rhombus_cell) ---
+            ctxL.fillStyle = '#0b0e14';
+            ctxL.fillRect(0, 0, cLattice.width, cLattice.height);
+
+            const rowGap = cLattice.height / 7;
+            const colGap = cLattice.width / 9;
+
+            // 繪製非對稱三倍斜方晶格網格
+            ctxL.strokeStyle = 'rgba(48, 54, 61, 0.5)';
+            ctxL.lineWidth = 1;
+            for(let r=0; r<8; r++) {
+                ctxL.beginPath();
+                for(let c=0; c<10; c++) {
+                    // 加上菱形斜向位移偏置
+                    let x = c * colGap + (r % 2) * (colGap / 2);
+                    let y = r * rowGap;
+                    if(c === 0) ctxL.moveTo(x, y);
+                    else ctxL.lineTo(x, y);
+                }
+                ctxL.stroke();
+            }
+
+            // 繪製縱向交錯晶胞連線
+            for(let c=0; c<10; c++) {
+                ctxL.beginPath();
+                for(let r=0; r<8; r++) {
+                    let x = c * colGap + (r % 2) * (colGap / 2);
+                    let y = r * rowGap;
+                    if(r === 0) ctxL.moveTo(x, y);
+                    else ctxL.lineTo(x, y);
+                }
+                ctxL.stroke();
+            }
+
+            // 繪製與目標對齊的異質匹配檢索脈衝 (heteo_recall)
+            deviceQueue.forEach(dev => {
+                let r = dev.assignedCell.r + 1;
+                let c = dev.assignedCell.c + 1;
+                let cellX = c * colGap + (r % 2) * (colGap / 2);
+                let cellY = r * rowGap;
+
+                // 基礎鎖定節點
+                ctxL.fillStyle = 'rgba(63, 185, 80, 0.4)';
+                ctxL.beginPath();
+                ctxL.arc(cellX, cellY, 4, 0, Math.PI*2);
+                ctxL.fill();
+
+                // 觸發聯想回憶時擴散的霓虹環形漣漪
+                if(dev.recallPulse > 0) {
+                    let maxRadius = 35;
+                    let currentRadius = (1.0 - dev.recallPulse) * maxRadius;
+                    ctxL.strokeStyle = `rgba(63, 185, 80, ${dev.recallPulse})`;
+                    ctxL.lineWidth = 2;
+                    ctxL.beginPath();
+                    ctxL.arc(cellX, cellY, currentRadius, 0, Math.PI*2);
+                    ctxL.stroke();
+
+                    // 文字標籤提示
+                    ctxL.fillStyle = `rgba(63, 185, 80, ${dev.recallPulse})`;
+                    ctxL.font = '9px monospace';
+                    ctxL.fillText(`RECALL MATCH: T_${dev.id}`, cellX + 8, cellY - 5);
+                }
+            });
+
+            // 全局大浪湧遮罩特效
+            if(config.surgeActive) {
+                ctxL.fillStyle = 'rgba(188, 140, 255, 0.03)';
+                ctxL.fillRect(0,0,cLattice.width, cLattice.height);
+                ctxR.fillStyle = 'rgba(188, 140, 255, 0.03)';
+                ctxR.fillRect(0,0,cRadar.width, cRadar.height);
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        function varColor(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
+        // 啟動動畫
+        requestAnimationFrame(draw);
+    </script>
+</body>
+</html>
