@@ -1,0 +1,151 @@
+import numpy as np
+import time
+import random
+
+class RFAntennaFrontEnd:
+    """模擬天線前端接收到的高頻射頻信號 (RF Input)"""
+    def __init__(self):
+        self.carrier_freq = 2.4e9  # 2.4 GHz 載波
+        self.noise_floor = -100     # dBm (底噪)
+
+    def get_turbulence_power(self):
+        # 模擬環境中帶外噪聲的起伏 (turbulence_level)
+        self.noise_floor = -100 + random.uniform(0, 15)
+        return self.noise_floor
+
+    def get_rf_signal(self):
+        # 模擬一個帶有相位偏移的射頻正弦波
+        t = np.linspace(0, 1e-9, 100) # 1奈秒的時間窗口
+        theta = random.uniform(0, np.pi) # 隨機到達角 AOA (theta)
+        amplitude = random.uniform(0.01, 1.5) # 信號幅度 (正比於距離)
+        rf_wave = amplitude * np.sin(2 * np.pi * self.carrier_freq * t + theta)
+        return {"wave": rf_wave, "theta": theta, "amplitude": amplitude}
+
+class LocalOscillator_iRABBIT:
+    """模擬鎖相環壓控振盪器 (VCO/PLL) 充當快速跳頻的本振 (LO)"""
+    @staticmethod
+    def get_lo_clock():
+        # 提供相干解調所需的同步時鐘邊沿與當前鎖定信道
+        return {
+            "lo_frequency": random.choice([2.412e9, 2.437e9, 2.462e9]), # 信道 1, 6, 11
+            "phase_noise": random.uniform(-110, -90), # dBc/Hz @ 10kHz
+            "tick_ns": time.time_ns()
+        }
+
+class DirectionalCoupler:
+    """方向性耦合器 (arc_api_listener)"""
+    def __init__(self, rf_data):
+        self.main_wave = rf_data["wave"]
+        self.theta = rf_data["theta"]
+        self.amplitude = rf_data["amplitude"]
+
+    def engage_attenuator(self):
+        # 模擬消除雜散信號與阻抗匹配的開關衰減過程 (shield_drop)
+        coupled_loss_db = 10  # 10dB 耦合器
+        self.coupled_amplitude = self.amplitude * (10 ** (-coupled_loss_db / 20))
+        return self
+
+    def log_detector_rssi(self):
+        # 對數檢波器：將高頻幅度轉換為可測量的類比電壓 (growth_descend)
+        # 幅度越小，等效距離越遠
+        estimated_distance = 1.0 / (self.coupled_amplitude + 1e-6)
+        return {"distance_meters": estimated_distance, "theta": self.theta}
+
+class IQDemodulatorMatrix:
+    """正交解調矩陣 (trace_matrix)"""
+    def __init__(self, port_index=0):
+        self.port = port_index
+
+    def extract_phase_theta(self, rf_data):
+        # 提取相位差 (theta_transmit)
+        return rf_data["theta"]
+
+class PLLPhaseLockLoop:
+    """鎖相環調度器 (turn_in_rod_tick_commute_info)"""
+    def process_commute_info(self, lo_data):
+        # 結合本振與時間，計算用於相干的鎖定狀態
+        return {"lock_time_ns": lo_data["tick_ns"], "tuned_freq": lo_data["lo_frequency"]}
+
+class ZeroCrossingDetector:
+    """過零檢測器 (linear_start)：確立信號的解調基帶起點"""
+    def __init__(self, lock_status):
+        self.lock_status = lock_status
+
+    def correlate_fingerprint(self, extracted_theta, target_theta):
+        # 相干相關器：比對接收相位與目標相位的指紋吻合度 (_searched)
+        phase_error = abs(extracted_theta - target_theta)
+        is_matched = phase_error < 0.1 # 相位誤差在安全角度內
+        return is_matched
+
+class WindowComparator:
+    """視窗比較器 (shield_T-square)：硬體界限與幾何校對"""
+    def evaluate_boundary_attribute(self, rssi_distance, threshold_meters=5.0):
+        # 判斷物理距離（由檢波電壓換算）是否超出了設定的安全圍欄
+        is_beyond = rssi_distance < threshold_meters
+        return is_beyond
+
+class LCTankResonator:
+    """LC 諧振腔延遲線隊列 (seam_queue / wheel_charged)"""
+    def __init__(self):
+        self.q_factor = 50 # 品質因數
+
+    def charge_and_delay(self, trigger_condition):
+        # 模擬 LC 槽路在匹配頻率下充電建立電壓幅度的過程
+        if trigger_condition:
+            print(f"[LC Tank] ⚡ LC 諧振腔起振！能量充電完成，品質因數 Q={self.q_factor}。")
+            return "RF_TRIGGER_PULSE_HIGH"
+        return "RF_TRIGGER_PULSE_LOW"
+
+# ==========================================
+# 射頻電路物理模擬運行
+# ==========================================
+
+if __name__ == "__main__":
+    antenna = RFAntennaFrontEnd()
+    lo_vco = LocalOscillator_iRABBIT
+    iq_matrix = IQDemodulatorMatrix(port_index=0)
+    lc_tank = LCTankResonator()
+
+    print("=" * 70)
+    print(" 📡 射頻硬體模擬器：超外差相干接收與鎖相解調電路系統 啟動...")
+    print("=" * 70)
+
+    for tick in range(1, 4):
+        print(f"\n--- [RF Clock Cycle {tick}] ---")
+        
+        # 1. 天線收信與雜訊檢測 (turbulence_level)
+        noise = antenna.get_turbulence_power()
+        rf_signal = antenna.get_rf_signal()
+        print(f"[天線 Rx] 檢測到信道噪聲: {noise:.2f} dBm")
+
+        # 2. 耦合器與對數檢波 (arc_api_listener -> shield_drop -> growth_descend)
+        coupler = DirectionalCoupler(rf_signal)
+        detector_output = coupler.engage_attenuator().log_detector_rssi()
+        distance = detector_output["distance_meters"]
+        print(f"[耦合檢波] 對數檢波輸出等效靶距: {distance:.2f} 公尺")
+
+        # 3. 壓控本振跳頻 (CLOCK_iRABBIT -> commute_info)
+        lo_state = lo_vco.get_lo_clock()
+        pll_controller = PLLPhaseLockLoop()
+        lock_status = pll_controller.process_commute_info(lo_state)
+        print(f"[本振 VCO] PLL鎖定頻率: {lock_state['lo_frequency']/1e9:.3f} GHz (相位雜訊: {lo_state['phase_noise']:.1f} dBc/Hz)")
+
+        # 4. 相干相位檢波 (linear_start -> _searched[trace_matrix.theta_transmit])
+        sync_detector = ZeroCrossingDetector(lock_status)
+        extracted_phase = iq_matrix.extract_phase_theta(rf_signal)
+        # 假設目標參考相位是 1.25 rad
+        phase_lock_match = sync_detector.correlate_fingerprint(extracted_phase, target_theta=1.25)
+        print(f"[IQ 矩陣] 提取載波相位差 θ: {extracted_phase:.4f} rad | 相關器同步鎖定: {phase_lock_match}")
+
+        # 5. T型視窗限幅判定與 LC 諧振 (shield_T-square -> beyond -> seam_queue)
+        comparator = WindowComparator()
+        is_beyond_boundary = comparator.evaluate_boundary_attribute(distance, threshold_meters=6.0)
+        
+        # 6. 模擬原 DSL 的嵌套執行
+        # buffer_selected_tooth_embedded( seam_queue().wheel_charged().beyond(...) )
+        trigger_state = lc_tank.charge_and_delay(is_beyond_boundary)
+        
+        # 最終寫入採樣保持緩衝器
+        print(f"[採樣保持] ⚙️ 保持器開關閉合！已鎖定射頻判決脈衝訊號: [{trigger_state}] 並寫入硬體 Buffer。")
+
+        time.sleep(1)
